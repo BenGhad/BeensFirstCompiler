@@ -24,21 +24,6 @@ static void kernel_relu(float* X, int N){
 }
 """
 
-def find_weight(ir, name):
-    for o in ir["ops"]:
-        if o["op"].lower() == "const" and (
-            o["id"][1:] == name or o["attrs"].get("name") == name
-        ):
-            return o["attrs"]["sym"]
-    raise KeyError(name)
-
-def is_const_value(ir, name):
-    try:
-        find_weight(ir, name)
-        return True
-    except KeyError:
-        return False
-
 
 
 def emit(ir_json, out_c):
@@ -51,27 +36,30 @@ def emit(ir_json, out_c):
 
     # embed weights
     wid = 0
-    for op in ir["ops"]:
-        if op["op"].lower() == "const":
-            file_field = op["attrs"]["file"]
-            wpath = Path(file_field)
-            if not wpath.is_absolute():
-                wpath = (base_dir / wpath).resolve()
-            if not wpath.exists():
-                raise FileNotFoundError(
-                    f"weight not found: {wpath} (from attrs.file={file_field}, base={base_dir})"
-                )
-            arr = np.load(wpath)
-            flat = ",".join(f"{float(x):.9g}" for x in arr.flatten())
-            c.append(f"static const float W{wid}[] = {{{flat}}};")
-            op["attrs"]["sym"] = f"W{wid}"
-            op["attrs"]["size"] = int(arr.size)
-            op["attrs"]["shape"] = ir["values"][op["id"][1:]]["shape"]
-            wid += 1
+    for name, cst in ir.get("consts", {}).items():
+        file_field = cst["storage"]["file"]
+        wpath = Path(file_field)
+
+        if not wpath.is_absolute():
+            wpath = (base_dir / wpath).resolve()
+
+        if not wpath.exists():
+            raise FileNotFoundError(
+                f"weight not found: {wpath} (from attrs.file={file_field}, base={base_dir})"
+            )
+        arr = np.load(wpath)
+        flat = ",".join(f"{float(x):.9g}" for x in arr.flatten())
+        c.append(f"static const float W{wid}[] = {{{flat}}};")
+        cst["symbol"] = f"W{wid}"
+        wid += 1
 
     c.append("int aicc_run(const aicc_tensor* inputs, aicc_tensor* outputs){")
     c.append("  const float* x = inputs[0].data;")
-    c.append("  enum { BUF_CAP = 128*128 };")
+
+    max_elems = max(np.prod(v["type"]["shape"]) for v in ir["values"].values())
+    c.append(f"  enum {{ BUF_CAP = {int(max_elems)} }};")
+
+
     c.append("  static float buf0[BUF_CAP];")
     c.append("  static float buf1[BUF_CAP];")
     c.append("  float* cur = buf0;")
@@ -81,11 +69,13 @@ def emit(ir_json, out_c):
     cur_M = None
     cur_N = None
     for op in ir["ops"]:
-        oid, opk = op["id"][1:], op["op"].lower()
+        opk = op["op"].lower()
+
         if opk == "matmul":
             A, B = op["inputs"]
-            Ashp = ir["values"][A]["shape"]
-            Bshp = ir["values"][B]["shape"]
+            Ashp = ir["values"][A]["type"]["shape"]
+            Bshp = ir["values"][B]["type"]["shape"]
+
             if not (len(Ashp) == 2 and len(Bshp) == 2):
                 raise RuntimeError(f"MatMul expects rank-2, got A{Ashp}, B{Bshp}")
             M, K = Ashp
@@ -93,7 +83,11 @@ def emit(ir_json, out_c):
             if K != Kb:
                 raise RuntimeError(f"MatMul K mismatch: {K} vs {Kb}")
             srcA = "x" if A == ir["entry"]["inputs"][0] else "cur"
-            srcB = find_weight(ir, B)
+            # gotta guard B jic
+            if B not in ir["consts"]:
+                raise RuntimeError("Phase-1 Matmul requires const weight on B")
+            srcB = ir["consts"][B]["symbol"]
+
             c.append(f"  /* MatMul {A}({M}x{K}) x {B}({Kb}x{N}) */")
             c.append(f"  if ((size_t)({M}*{N}) > BUF_CAP) return -2;")
             c.append(f"  for(int i=0;i<{M}*{N};++i) nxt[i]=0.f;")
@@ -106,15 +100,19 @@ def emit(ir_json, out_c):
             a, b = op["inputs"]
 
             # pick the constant side regardless of position
-            if is_const_value(ir, b):
-                w = b
-            elif is_const_value(ir, a):
+            if a in ir["consts"]:
                 w = a
+            elif b in ir["consts"]:
+                w = b
             else:
                 raise RuntimeError("Phase-1 Add requires one const operand")
 
-            bshape = ir["values"][w]["shape"]
-            sym = find_weight(ir, w)
+            # another guard
+            if ir["consts"][w]["type"]["dtype"] != "f32":
+                raise RuntimeError("unsupported const dtype for add")
+
+            bshape = ir["values"][w]["type"]["shape"]
+            sym = ir["consts"][w]["symbol"]
 
             # support (M,N)+(N) or (M,N)+(M,N)
             if len(bshape) == 1 and bshape[0] == cur_N:
@@ -126,7 +124,7 @@ def emit(ir_json, out_c):
 
         elif opk == "relu":
             c.append(f"  kernel_relu(cur, {cur_M*cur_N});")
-        elif opk in ("identity", "reshape", "const"):
+        elif opk in ("identity", "reshape"):
             pass
         else:
             raise RuntimeError(f"unhandled op {opk}")

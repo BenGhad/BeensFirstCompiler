@@ -2,77 +2,56 @@ from pathlib import Path
 import sys
 sys.path.append(str(Path(__file__).resolve().parents[2]))  # repo root
 
-from ir.ir import Module, Value, Op
-
 # loader + emitter
 import onnx, numpy as np, json
 from pathlib import Path
-from ir.ir import Module, Value, Op
+
 
 def load(onnx_path: str):
-    m = onnx.load(onnx_path)
-    g = m.graph
-
-    values = {}
-    weight_blobs = {}  # name -> np.array
+    m = onnx.load(onnx_path); g = m.graph
+    ir = {"meta":{"ir_version":2,"producer":"aicc-0.1","opset":1},
+          "values":{}, "consts":{}, "ops":[], "entry":{"inputs":[],"outputs":[]}}
 
     def put_val(name, shape, dtype="f32"):
-        if name not in values:
-            values[name] = Value(name, dtype, list(map(int, shape or [])))
+        shape = list(map(int, shape or []))
+        ir["values"].setdefault(name, {"type":{"dtype":dtype,"shape":shape}})
+        ir["values"][name]["type"]["shape"] = shape
 
+    # seed values and entry
     for vi in list(g.input)+list(g.output)+list(g.value_info):
         shp = [d.dim_value for d in vi.type.tensor_type.shape.dim]
         put_val(vi.name, shp)
+    ir["entry"]["inputs"]  = [vi.name for vi in g.input]
+    ir["entry"]["outputs"] = [vo.name for vo in g.output]
 
-
-    ops = []
-
+    # initializers → consts
     for init in g.initializer:
         arr = onnx.numpy_helper.to_array(init).astype("float32")
-        weight_blobs[init.name] = arr
-        put_val(init.name, arr.shape)
-        ops.append(Op(f"%{init.name}", "const", [], {"name": init.name}))
+        put_val(init.name, arr.shape, "f32")
+        ir["consts"][init.name] = {
+            "type":{"dtype":"f32","shape":list(arr.shape)},
+            "storage":{"file": str(Path(f"{init.name}.npy"))}  # or {"inline": ...}
+        }
 
-
+    # nodes → ops, no Const ops
     for i, n in enumerate(g.node):
-        out = n.output[0]
-        oid = f"%{out}"
-        if n.op_type in ("Identity","Reshape"):
-            ops.append(Op(oid, n.op_type.lower(), [n.input[0]]))
-        elif n.op_type == "MatMul":
-            ops.append(Op(oid, "matmul", [n.input[0], n.input[1]]))
-        elif n.op_type == "Add":
-            ops.append(Op(oid, "add", [n.input[0], n.input[1]]))
-        elif n.op_type == "Relu":
-            ops.append(Op(oid, "relu", [n.input[0]]))
-        elif n.op_type == "Constant":
-            arr = onnx.numpy_helper.to_array(n.attribute[0].t).astype("float32")
-            name = f"const_{i}"
-            weight_blobs[name] = arr
-            put_val(name, arr.shape)
-            put_val(out, arr.shape)
-            ops.append(Op(oid, "const", [], {"name": name}))
-        else:
-            raise NotImplementedError(f"Unsupported op: {n.op_type}")
+        if n.op_type == "Constant":
+            # simplest path for now
+            raise NotImplementedError("ONNX Constant not supported in importer v2")
+        outs = list(n.output)
+        if not outs:  # skip nodes without outputs
+            continue
+        ir["ops"].append({
+            "op_id": f"n{i}",
+            "op": n.op_type,
+            "inputs": list(n.input),
+            "outputs": [outs[0]],
+            "attrs": {}
+        })
 
-        if n.op_type == "MatMul":
-            a, b = values[n.input[0]], values[n.input[1]]
-            put_val(out, [a.shape[0], b.shape[1]])
-        elif n.op_type in ("Add","Relu","Identity","Reshape"):
-            put_val(out, values[n.input[0]].shape)
-
-    entry_inputs  = [g.input[0].name]
-    entry_outputs = [g.output[0].name]
-    mod = Module(values, ops, entry_inputs, entry_outputs)
-    return mod, weight_blobs
+    return ir
 
 def emit_ir_json(onnx_path: str, out_root: str = "builds", project: str | None = None):
-    """
-    Write:
-      builds/<project>/graph.ir.json
-      builds/<project>/weights/<name>.npy
-    If project is None, uses Path(onnx_path).stem
-    """
     onnx_p = Path(onnx_path)
     proj = project or onnx_p.stem
     base = Path(out_root) / proj
@@ -80,23 +59,24 @@ def emit_ir_json(onnx_path: str, out_root: str = "builds", project: str | None =
     base.mkdir(parents=True, exist_ok=True)
     weights_dir.mkdir(parents=True, exist_ok=True)
 
-    mod, blobs = load(str(onnx_p))
-    wmap_rel = {}
+    ir = load(str(onnx_p))
 
-    for name, arr in blobs.items():
+    m = onnx.load(str(onnx_p))
+    init_map = {i.name: onnx.numpy_helper.to_array(i).astype("float32") for i in m.graph.initializer}
+
+    weights_map = {}
+    for name in ir.get("consts", {}):
+        arr = init_map[name]
         p = weights_dir / f"{name}.npy"
         np.save(p, arr)
-        wmap_rel[name] = (Path("weights") / f"{name}.npy").as_posix()  # relative to base
-
-    for op in mod.ops:
-        if op.op == "const" and "name" in op.attrs:
-            op.attrs["file"] = wmap_rel[op.attrs["name"]]
+        weights_map[name] = str(p)
+        ir["consts"][name]["storage"]["file"] = (Path("weights") / f"{name}.npy").as_posix()
 
     graph_path = base / "graph.ir.json"
     with open(graph_path, "w") as f:
-        json.dump(mod.to_json(), f, indent=2)
+        json.dump(ir, f, indent=2)
+    return str(graph_path), weights_map
 
-    return str(graph_path), {k: str((base / v).resolve()) for k, v in wmap_rel.items()}
 
 if __name__ == "__main__":
     import argparse, sys

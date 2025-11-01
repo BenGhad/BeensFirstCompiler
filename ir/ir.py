@@ -9,6 +9,8 @@
 from dataclasses import dataclass, field
 from typing import List, Dict, Any
 
+
+
 @dataclass
 class Value:  # tensor value
     id: str
@@ -24,6 +26,7 @@ class Op:
 
 @dataclass
 class Module:
+
     values: Dict[str, Value]
     ops: List[Op]
     entry_inputs: List[str]
