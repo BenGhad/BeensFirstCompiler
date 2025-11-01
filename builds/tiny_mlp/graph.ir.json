@@ -1,0 +1,99 @@
+{
+  "values": {
+    "x": {
+      "dtype": "f32",
+      "shape": [
+        1,
+        4
+      ]
+    },
+    "y": {
+      "dtype": "f32",
+      "shape": [
+        1,
+        3
+      ]
+    },
+    "W": {
+      "dtype": "f32",
+      "shape": [
+        4,
+        3
+      ]
+    },
+    "b": {
+      "dtype": "f32",
+      "shape": [
+        3
+      ]
+    },
+    "z1": {
+      "dtype": "f32",
+      "shape": [
+        1,
+        3
+      ]
+    },
+    "z2": {
+      "dtype": "f32",
+      "shape": [
+        1,
+        3
+      ]
+    }
+  },
+  "ops": [
+    {
+      "id": "%W",
+      "op": "const",
+      "inputs": [],
+      "attrs": {
+        "name": "W",
+        "file": "weights/W.npy"
+      }
+    },
+    {
+      "id": "%b",
+      "op": "const",
+      "inputs": [],
+      "attrs": {
+        "name": "b",
+        "file": "weights/b.npy"
+      }
+    },
+    {
+      "id": "%z1",
+      "op": "matmul",
+      "inputs": [
+        "x",
+        "W"
+      ],
+      "attrs": {}
+    },
+    {
+      "id": "%z2",
+      "op": "add",
+      "inputs": [
+        "z1",
+        "b"
+      ],
+      "attrs": {}
+    },
+    {
+      "id": "%y",
+      "op": "relu",
+      "inputs": [
+        "z2"
+      ],
+      "attrs": {}
+    }
+  ],
+  "entry": {
+    "inputs": [
+      "x"
+    ],
+    "outputs": [
+      "y"
+    ]
+  }
+}
