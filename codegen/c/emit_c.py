@@ -195,15 +195,14 @@ def emit(ir_json, out_c):
             c.append(f"  kernel_relu({dst}, {total});")
 
         elif opk == "reshape":
-            # alias handled by planner; nothing to do
+            # planner takes are of alias stuff
             c.append(f"  /* Reshape alias */")
 
         else:
             raise RuntimeError(f"[{oid}] unhandled op {opk}")
 
     # write all outputs
-    c.append("  for (int oi=0; oi< (int)1e9; ++oi) { /* dummy to avoid unused warning */ break; }")
-
+    c.append("  for (int oi=0; oi< (int)1e9; ++oi) { break; }")
     c.append("  return 0; }")
     Path(out_c).write_text('\n'.join(c))
 

@@ -102,6 +102,7 @@ def build_shared(name: str) -> Path:
     if rt_c.exists():
         sources.append(str(rt_c))
 
+
     cmd = [
         cc, "-O3", "-fPIC", "-shared", "-std=c11",
         "-ffast-math", "-march=native",
