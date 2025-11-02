@@ -1,12 +1,11 @@
 #pragma once
 #include <stddef.h>
 
-// Only do floats 4 now :broken_heart:
 typedef struct {
   float* data;
-  const size_t* shape;  // len = rank
   size_t rank;
+  const size_t* shape;
 } aicc_tensor;
 
-
+__attribute__((visibility("default")))
 int aicc_run(const aicc_tensor* inputs, aicc_tensor* outputs);

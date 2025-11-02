@@ -90,17 +90,21 @@ graph = helper.make_graph(
 
 model = helper.make_model(
     graph,
-    opset_imports=[helper.make_opsetid("", 13)]
-    # gimme the default ops from versoin 13.
+    opset_imports=[helper.make_opsetid("", 13)],
+    ir_version=11,
 )
 
-out_dir = Path("examples/builds/mlp_example")
+
+onnx.checker.check_model(model)
+out_dir = Path("examples/builds/tiny_mlp")
 out_dir.mkdir(parents=True, exist_ok=True)
 
 onnx_path = out_dir / "tiny_mlp.onnx"
 onnx.save(model, onnx_path)
 
 # Serializes the model into a .onnx file on disk.
+
+
 
 # -----------------------------------------------------------
 # Save some example input and parameters for testing
@@ -110,9 +114,7 @@ np.save(out_dir / "x.npy", np.random.randn(1,4).astype("float32"))
 np.save(out_dir / "W.npy", W)
 np.save(out_dir / "b.npy", b)
 
-# -----------------------------------------------------------
-# 🧩 Under the hood summary
-# -----------------------------------------------------------
+
 # This constructs a simple ONNX graph:
 #
 #     x ──▶ MatMul ──▶ Add ──▶ Relu ──▶ y

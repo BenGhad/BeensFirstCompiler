@@ -1,0 +1,283 @@
+{
+  "meta": {
+    "ir_version": 2,
+    "producer": "aicc-0.1",
+    "opset": 13,
+    "opset_import": {
+      "": 13
+    },
+    "arena_elems": 1024,
+    "offsets": {
+      "x": 0,
+      "z1_mm": 512,
+      "z2_mm": 0,
+      "z1_add": 512,
+      "z2_add": 0,
+      "z1": 512,
+      "z2": 0,
+      "y": 0
+    }
+  },
+  "values": {
+    "x": {
+      "type": {
+        "dtype": "f32",
+        "shape": [
+          1,
+          512
+        ]
+      }
+    },
+    "y": {
+      "type": {
+        "dtype": "f32",
+        "shape": [
+          1,
+          512
+        ]
+      }
+    },
+    "W1": {
+      "type": {
+        "dtype": "f32",
+        "shape": [
+          512,
+          512
+        ]
+      }
+    },
+    "b1": {
+      "type": {
+        "dtype": "f32",
+        "shape": [
+          512
+        ]
+      }
+    },
+    "W2": {
+      "type": {
+        "dtype": "f32",
+        "shape": [
+          512,
+          512
+        ]
+      }
+    },
+    "b2": {
+      "type": {
+        "dtype": "f32",
+        "shape": [
+          512
+        ]
+      }
+    },
+    "z1_mm": {
+      "type": {
+        "dtype": "f32",
+        "shape": [
+          1,
+          512
+        ]
+      }
+    },
+    "z1_add": {
+      "type": {
+        "dtype": "f32",
+        "shape": [
+          1,
+          512
+        ]
+      }
+    },
+    "z1": {
+      "type": {
+        "dtype": "f32",
+        "shape": [
+          1,
+          512
+        ]
+      }
+    },
+    "z2_mm": {
+      "type": {
+        "dtype": "f32",
+        "shape": [
+          1,
+          512
+        ]
+      }
+    },
+    "z2_add": {
+      "type": {
+        "dtype": "f32",
+        "shape": [
+          1,
+          512
+        ]
+      }
+    },
+    "z2": {
+      "type": {
+        "dtype": "f32",
+        "shape": [
+          1,
+          512
+        ]
+      }
+    }
+  },
+  "consts": {
+    "W1": {
+      "type": {
+        "dtype": "f32",
+        "shape": [
+          512,
+          512
+        ]
+      },
+      "storage": {
+        "file": "weights/W1.npy"
+      }
+    },
+    "b1": {
+      "type": {
+        "dtype": "f32",
+        "shape": [
+          512
+        ]
+      },
+      "storage": {
+        "file": "weights/b1.npy"
+      }
+    },
+    "W2": {
+      "type": {
+        "dtype": "f32",
+        "shape": [
+          512,
+          512
+        ]
+      },
+      "storage": {
+        "file": "weights/W2.npy"
+      }
+    },
+    "b2": {
+      "type": {
+        "dtype": "f32",
+        "shape": [
+          512
+        ]
+      },
+      "storage": {
+        "file": "weights/b2.npy"
+      }
+    }
+  },
+  "ops": [
+    {
+      "op_id": "n0",
+      "id": "n0",
+      "op": "matmul",
+      "inputs": [
+        "x",
+        "W1"
+      ],
+      "outputs": [
+        "z1_mm"
+      ],
+      "attrs": {},
+      "domain": ""
+    },
+    {
+      "op_id": "n3",
+      "id": "n3",
+      "op": "matmul",
+      "inputs": [
+        "x",
+        "W2"
+      ],
+      "outputs": [
+        "z2_mm"
+      ],
+      "attrs": {},
+      "domain": ""
+    },
+    {
+      "op_id": "n1",
+      "id": "n1",
+      "op": "add",
+      "inputs": [
+        "z1_mm",
+        "b1"
+      ],
+      "outputs": [
+        "z1_add"
+      ],
+      "attrs": {},
+      "domain": ""
+    },
+    {
+      "op_id": "n4",
+      "id": "n4",
+      "op": "add",
+      "inputs": [
+        "z2_mm",
+        "b2"
+      ],
+      "outputs": [
+        "z2_add"
+      ],
+      "attrs": {},
+      "domain": ""
+    },
+    {
+      "op_id": "n2",
+      "id": "n2",
+      "op": "relu",
+      "inputs": [
+        "z1_add"
+      ],
+      "outputs": [
+        "z1"
+      ],
+      "attrs": {},
+      "domain": ""
+    },
+    {
+      "op_id": "n5",
+      "id": "n5",
+      "op": "relu",
+      "inputs": [
+        "z2_add"
+      ],
+      "outputs": [
+        "z2"
+      ],
+      "attrs": {},
+      "domain": ""
+    },
+    {
+      "op_id": "n6",
+      "id": "n6",
+      "op": "add",
+      "inputs": [
+        "z1",
+        "z2"
+      ],
+      "outputs": [
+        "y"
+      ],
+      "attrs": {},
+      "domain": ""
+    }
+  ],
+  "entry": {
+    "inputs": [
+      "x"
+    ],
+    "outputs": [
+      "y"
+    ]
+  }
+}

@@ -3,15 +3,25 @@ import json, numpy as np, sys
 from pathlib import Path
 
 MATMUL = r"""
-static void kernel_matmul(const float* A, const float* B, float* C, int M, int K, int N){
-  for(int i=0;i<M;++i)
-    for(int k=0;k<K;++k){
-      float a = A[i*K + k];
-      for(int j=0;j<N;++j)
-        C[i*N + j] += a * B[k*N + j];
+#include <cblas.h>
+static void kernel_matmul(const float* A,const float* B,float* C,int M,int K,int N){
+  long work = (long)M*(long)K*(long)N;          // ~ MACs
+  if (work < 2000000L) {                        // tune threshold
+    for(int i=0;i<M;++i){
+      for(int j=0;j<N;++j) C[i*N+j] = 0.f;
+      for(int k=0;k<K;++k){
+        float a = A[i*K + k];
+        for(int j=0;j<N;++j) C[i*N + j] += a * B[k*N + j];
+      }
     }
+    return;
+  }
+  cblas_sgemm(CblasRowMajor,CblasNoTrans,CblasNoTrans,
+              M,N,K,1.0f,A,K,B,N,0.0f,C,N);
 }
+
 """
+
 
 ADD_INPLACE = r"""
 static void kernel_add(float* X, const float* B, int N){
@@ -34,8 +44,22 @@ def emit(ir_json, out_c):
         raise RuntimeError("no graph outputs")
 
     # Phase-3 emits f32 only
-    if any(v["type"]["dtype"] not in ("f32",) for v in ir["values"].values()):
-        raise RuntimeError("emitter supports only f32 tensors")
+    must_f32 = set(ir["entry"]["inputs"]) | set(ir["entry"]["outputs"])
+    for op in ir["ops"]:
+        k = op["op"].lower(); ins = op["inputs"]; outs = op["outputs"]
+        if k == "matmul":
+            must_f32.add(ins[0]);  must_f32.update(outs)
+        elif k == "add":
+            must_f32.update(ins);  must_f32.update(outs)
+        elif k == "relu":
+            must_f32.update(ins);  must_f32.update(outs)
+        elif k == "reshape":
+            must_f32.add(ins[0]);  must_f32.update(outs)
+
+    off = {v: ir["values"][v]["type"]["dtype"] for v in must_f32 if ir["values"][v]["type"]["dtype"] != "f32"}
+    if off:
+        listed = ", ".join(f"{k}({dt})" for k, dt in off.items())
+        raise RuntimeError(f"emitter supports only f32 tensors on data paths; found: {listed}")
 
     # C prologue
     c = ["#include <stddef.h>", '#include "aicc_runtime.h"']
@@ -65,11 +89,15 @@ def emit(ir_json, out_c):
         raise RuntimeError("arena_elems missing or zero; run passes.run_all first")
 
     offsets = ir["meta"]["offsets"]
+
     name2idx = {name: i for i, name in enumerate(ir["entry"]["inputs"])}
+    out2idx  = {name: i for i, name in enumerate(ir["entry"]["outputs"])}
 
     def ptr_expr(val):
         if val in name2idx:
             return f"inputs[{name2idx[val]}].data"
+        if val in out2idx:
+            return f"outputs[{out2idx[val]}].data"   # compute directly into outputs
         off = offsets.get(val)
         if off is None:
             raise RuntimeError(f"no storage for value '{val}'")
@@ -79,6 +107,7 @@ def emit(ir_json, out_c):
     c.append("int aicc_run(const aicc_tensor* inputs, aicc_tensor* outputs){")
     c.append(f"  enum {{ ARENA_ELEMS = {arena_elems} }};")
     c.append("  static float arena[ARENA_ELEMS];")
+
 
     # emit ops in topo order
     for op in ir["ops"]:
@@ -100,32 +129,58 @@ def emit(ir_json, out_c):
             srcB = ir["consts"][B]["symbol"]
             dst  = ptr_expr(O)
             c.append(f"  /* MatMul {A}({M}x{K}) x {B}({Kb}x{N}) -> {O} */")
-            c.append(f"  for(int i=0;i<{M}*{N};++i) {dst}[i]=0.f;")
             c.append(f"  kernel_matmul({srcA}, {srcB}, {dst}, {M},{K},{N});")
 
         elif opk == "add":
             a, b = op["inputs"]; O = op["outputs"][0]
-            # choose activation vs weight
-            if a in ir["consts"] and b in ir["consts"]:
-                raise RuntimeError(f"[{oid}] Add has two consts; unsupported")
-            act = b if a in ir["consts"] else a
-            w   = a if a in ir["consts"] else b
+            a_const = a in ir["consts"]
+            b_const = b in ir["consts"]
+
+            Ashp = dims_of(a)
+            Bshp = dims_of(b)
+            if numel(Ashp) is None or numel(Bshp) is None:
+                raise RuntimeError(f"[{oid}] Add requires concrete shapes")
+            totalA = numel(Ashp)
+            totalB = numel(Bshp)
 
             dst = ptr_expr(O)
+
+            # -------- case 1: both activations (z1 + z2) --------
+            if not a_const and not b_const:
+                srcA = ptr_expr(a)
+                srcB = ptr_expr(b)
+                if Ashp != Bshp:
+                    raise RuntimeError(f"[{oid}] Add act+act requires same shape, got {Ashp} vs {Bshp}")
+                c.append(f"  /* Add act+act {a} + {b} -> {O} */")
+                c.append(f"  if ({dst} != {srcA}) for(int i=0;i<{totalA}; ++i) {dst}[i] = {srcA}[i];")
+                c.append(f"  kernel_add({dst}, {srcB}, {totalA});")
+                continue
+
+            # Decide activation vs weight-const
+            act = b if a_const else a
+            w   = a if a_const else b
             src = ptr_expr(act)
             shp = dims_of(act)
-            if numel(shp) is None: raise RuntimeError(f"[{oid}] activation shape must be concrete")
             total = numel(shp)
-            sym = ir["consts"][w]["symbol"]
             wshape = ir["values"][w]["type"]["shape"]
 
-            c.append(f"  /* Add {act} + {w} -> {O} */")
+            c.append(f"  /* Add act+const {act} + {w} -> {O} */")
+            # materialize activation into dst if needed
             c.append(f"  if ({dst} != {src}) for(int i=0;i<{total}; ++i) {dst}[i] = {src}[i];")
+
+            # const payload
+            if w not in ir["consts"]:
+                raise RuntimeError(f"[{oid}] expected const on one Add input")
+            sym = ir["consts"][w]["symbol"]
+
+            # broadcasts
             if len(wshape) == 0:
                 c.append(f"  for(int i=0;i<{total}; ++i) {dst}[i] += {sym}[0];")
-            elif len(wshape) == 1 and isinstance(wshape[0], int) and wshape[0] == shp[1]:
+            elif len(wshape) == 1 and isinstance(wshape[0], int) and len(shp) == 2 and wshape[0] == shp[1]:
+                # row-wise bias
                 c.append(f"  for(int i=0;i<{shp[0]}; ++i) kernel_add({dst} + i*{shp[1]}, {sym}, {shp[1]});")
-            elif len(wshape) == 2 and wshape == shp:
+            elif wshape == shp and total == totalB:
+                # full tensor add
                 c.append(f"  kernel_add({dst}, {sym}, {total});")
             else:
                 raise RuntimeError(f"[{oid}] unsupported broadcast for Add: act{shp}, w{wshape}")
@@ -148,10 +203,6 @@ def emit(ir_json, out_c):
 
     # write all outputs
     c.append("  for (int oi=0; oi< (int)1e9; ++oi) { /* dummy to avoid unused warning */ break; }")
-    for i, oname in enumerate(ir["entry"]["outputs"]):
-        src = ptr_expr(oname)
-        c.append(f"  {{ size_t n=1; for(size_t d=0; d<outputs[{i}].rank; ++d) n*=outputs[{i}].shape[d];")
-        c.append(f"    for(size_t k=0;k<n;++k) outputs[{i}].data[k] = {src}[k]; }}")
 
     c.append("  return 0; }")
     Path(out_c).write_text('\n'.join(c))

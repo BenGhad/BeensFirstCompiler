@@ -1,13 +1,13 @@
+#!/usr/bin/env python3
 from pathlib import Path
-import sys
+import sys, re, json
 sys.path.append(str(Path(__file__).resolve().parents[2]))  # repo root
 
-import re
-import json
-import onnx
-import numpy as np
+import onnx, numpy as np
 from onnx import TensorProto
 from onnx import AttributeProto as A
+
+# ---------------- utils ----------------
 
 def constant_attr_to_array(n):
     at = {a.name: a for a in n.attribute}
@@ -36,7 +36,6 @@ def onnx_dtype_to_ir(elem):
         TensorProto.BOOL: "i1",
     }.get(elem, "unknown")
 
-
 def mir_dtype(arr):
     bfloat16 = getattr(np, "bfloat16", None)
     mapping = {
@@ -48,7 +47,6 @@ def mir_dtype(arr):
     if bfloat16 is not None:
         mapping[bfloat16] = "bf16"
     return mapping.get(arr.dtype.type, "unknown")
-
 
 def decode_attr(a):
     from onnx import AttributeProto as A
@@ -64,12 +62,12 @@ def decode_attr(a):
         if dt == "unknown":
             dt = mir_dtype(arr)
         return {"tensor": arr.tolist(), "dtype": dt, "shape": list(arr.shape)}
-    # Explicitly reject unsupported attribute kinds for now
     from onnx import AttributeProto as AP
     if a.type in (AP.GRAPH, AP.GRAPHS, AP.SPARSE_TENSOR, AP.SPARSE_TENSORS, AP.TENSORS):
         raise NotImplementedError(f"Unsupported attribute type: {a.type}")
     return None
 
+# ---------------- loader ----------------
 
 def load(onnx_path: str):
     m = onnx.load(onnx_path)
@@ -92,16 +90,29 @@ def load(onnx_path: str):
         if dtype:
             v["type"]["dtype"] = dtype
 
-    # shape dim conversion that preserves zeros and symbols
+    # preserve 0 and symbols
     def dim_to_ir(d):
-        tag = d.WhichOneof("value")  # 'dim_value' | 'dim_param' | None
-        if tag == "dim_value":
-            return int(d.dim_value)   # keep 0 as 0
-        if tag == "dim_param" and d.dim_param:
-            return d.dim_param        # symbolic
-        return -1                     # unknown
+        tag = d.WhichOneof("value")
+        if tag == "dim_value": return int(d.dim_value)
+        if tag == "dim_param" and d.dim_param: return d.dim_param
+        return -1
 
-    # seed values and entry
+    # map of initializer arrays for folding
+    init_arr = {i.name: onnx.numpy_helper.to_array(i) for i in g.initializer}
+
+    def add_inline_const(name: str, arr: np.ndarray):
+        if arr.dtype.kind == "f":
+            arr = arr.astype(np.float32, copy=False)
+            dt = "f32"
+        else:
+            dt = mir_dtype(arr)
+        put_val(name, arr.shape, dt)
+        ir["consts"][name] = {
+            "type": {"dtype": dt, "shape": list(arr.shape)},
+            "storage": {"inline": arr.tolist()},
+        }
+
+    # seed value types
     for vi in list(g.input) + list(g.output) + list(g.value_info):
         t = vi.type.tensor_type
         shp = [dim_to_ir(d) for d in t.shape.dim]
@@ -114,51 +125,116 @@ def load(onnx_path: str):
     # initializers → consts
     for init in g.initializer:
         arr = onnx.numpy_helper.to_array(init)
-        dt = onnx_dtype_to_ir(getattr(init, "data_type", 0))
-        if dt == "unknown":
-            dt = mir_dtype(arr)
+        if arr.dtype.kind == "f":
+            arr = arr.astype(np.float32, copy=False)
+        dt = "f32" if arr.dtype == np.float32 else onnx_dtype_to_ir(getattr(init, "data_type", 0))
         put_val(init.name, arr.shape, dt)
         ir["consts"][init.name] = {"type": {"dtype": dt, "shape": list(arr.shape)}, "storage": {}}
 
-    # nodes → ops, including Constant into consts table
+    # nodes → ops
     for i, n in enumerate(g.node):
+        # Constant nodes populate consts
         if n.op_type == "Constant":
             outs = [o for o in n.output if o]
             if not outs:
                 continue
             arr = constant_attr_to_array(n)
-            dt = mir_dtype(arr)
+            if isinstance(arr, np.ndarray) and arr.dtype.kind == "f":
+                arr = arr.astype(np.float32, copy=False)
+            dt = "f32" if isinstance(arr, np.ndarray) and arr.dtype == np.float32 else mir_dtype(arr)
             put_val(outs[0], list(arr.shape), dt)
             ir["consts"][outs[0]] = {"type": {"dtype": dt, "shape": list(arr.shape)}, "storage": {}}
             continue
 
+        # Gemm fast-path → MatMul (+Add). Handles transB=1 if B is initializer.
+        if n.op_type == "Gemm":
+            outs = [o for o in n.output if o]
+            if not outs:
+                continue
+            ins = [ii for ii in n.input if ii]
+            attrs_raw = {a.name: decode_attr(a) for a in n.attribute}
 
+            alpha  = float(attrs_raw.get("alpha",  1.0))
+            beta   = float(attrs_raw.get("beta",   1.0))
+            transA = int(attrs_raw.get("transA",  0))
+            transB = int(attrs_raw.get("transB",  0))
+
+            if alpha == 1.0 and transA == 0 and transB in (0, 1) and beta in (0.0, 1.0):
+                A = ins[0]
+                B = ins[1]
+                C = ins[2] if len(ins) > 2 else None
+
+                if transB == 1:
+                    if B in init_arr:
+                        BT = init_arr[B].T
+                        B_t_name = f"{B}__T"
+                        if B_t_name not in ir["consts"]:
+                            add_inline_const(B_t_name, BT)
+                        B = B_t_name
+                        transB = 0
+                    else:
+                        # cannot fold, keep Gemm
+                        pass
+
+                if transB == 0:
+                    op_id = n.name or f"n{i}"
+                    need_add = C is not None and beta == 1.0
+                    mm_out = outs[0] if not need_add else f"{outs[0]}__gemm_mm"
+
+                    ir["ops"].append({
+                        "op_id": f"{op_id}_mm", "id": f"{op_id}_mm",
+                        "op": "MatMul",
+                        "inputs": [A, B],
+                        "outputs": [mm_out],
+                        "attrs": {}, "domain": "",
+                    })
+                    if need_add:
+                        ir["ops"].append({
+                            "op_id": op_id, "id": op_id,
+                            "op": "Add",
+                            "inputs": [mm_out, C],
+                            "outputs": outs,
+                            "attrs": {}, "domain": "",
+                        })
+                    # beta==0 ignores C entirely
+                    continue
+
+            # Fallback: keep Gemm (will error in emitter if it reaches there)
+            outs2 = [o for o in n.output if o]
+            for o in outs2:
+                ir["values"].setdefault(o, {"type": {"dtype": "unknown", "shape": []}})
+            ins2 = [ii for ii in n.input if ii]
+            op_id = n.name or f"n{i}"
+            ir["ops"].append({
+                "op_id": op_id, "id": op_id,
+                "op": "Gemm",
+                "inputs": ins2, "outputs": outs2,
+                "attrs": attrs_raw, "domain": getattr(n, "domain", ""),
+            })
+            continue
+
+        # Generic path
         outs = [o for o in n.output if o]
         if not outs:
             continue
         for o in outs:
             ir["values"].setdefault(o, {"type": {"dtype": "unknown", "shape": []}})
-
         ins = [ii for ii in n.input if ii]
         attrs = {a.name: decode_attr(a) for a in n.attribute}
         op_id = n.name or f"n{i}"
-
         ir["ops"].append({
-            "op_id": op_id,
-            "id": op_id,                  # compatibility with passes expecting 'id'
+            "op_id": op_id, "id": op_id,
             "op": n.op_type,
-            "inputs": ins,
-            "outputs": outs,
-            "attrs": attrs,
-            "domain": getattr(n, "domain", ""),
+            "inputs": ins, "outputs": outs,
+            "attrs": attrs, "domain": getattr(n, "domain", ""),
         })
 
     return ir
 
+# ---------------- save ----------------
 
 def safe_name(s: str) -> str:
     return re.sub(r"[^0-9A-Za-z_.-]", "_", s)
-
 
 def emit_ir_json(onnx_path: str, out_root: str = "builds", project: str | None = None):
     onnx_p = Path(onnx_path)
@@ -170,52 +246,57 @@ def emit_ir_json(onnx_path: str, out_root: str = "builds", project: str | None =
 
     ir = load(str(onnx_p))
 
-    # collect tensor payloads from initializers and Constant nodes
+    # collect model tensors
     m = onnx.load(str(onnx_p))
     init_map = {i.name: onnx.numpy_helper.to_array(i) for i in m.graph.initializer}
-
     const_node_map = {}
     for n in m.graph.node:
         if n.op_type == "Constant":
             outs = [o for o in n.output if o]
-            if not outs:
-                continue
-            const_node_map[outs[0]] = constant_attr_to_array(n)
+            if outs:
+                const_node_map[outs[0]] = constant_attr_to_array(n)
 
+    # write weights, including inline
     weights_map = {}
-    for name in ir.get("consts", {}):
-        arr = init_map.get(name, const_node_map.get(name))
+    for name, cmeta in ir.get("consts", {}).items():
+        stor = cmeta.get("storage", {})
+        if "inline" in stor:
+            arr = np.array(stor["inline"], dtype=np.float32, copy=False)
+        else:
+            arr = init_map.get(name, const_node_map.get(name))
         if arr is None:
             raise KeyError(f"const '{name}' has no backing data")
+        if isinstance(arr, np.ndarray) and arr.dtype.kind == "f":
+            arr = arr.astype(np.float32, copy=False)
+            ir["consts"][name]["type"]["dtype"] = "f32"
         fname = f"{safe_name(name)}.npy"
         p = weights_dir / fname
         np.save(p, arr, allow_pickle=False)
         weights_map[name] = str(p)
-        ir["consts"][name]["storage"]["file"] = (Path("weights") / fname).as_posix()
+        ir["consts"][name].setdefault("storage", {})["file"] = (Path("weights") / fname).as_posix()
 
     graph_path = base / "graph.ir.json"
     with open(graph_path, "w") as f:
         json.dump(ir, f, indent=2)
     return str(graph_path), weights_map
 
+# ---------------- cli ----------------
 
 if __name__ == "__main__":
     import argparse
 
     parser = argparse.ArgumentParser(description="Export IR JSON and .npy weights from an ONNX model.")
     parser.add_argument("onnx_path", help="Path to the .onnx model")
-    parser.add_argument("-o", "--out-root", default="builds", help="Output root directory (default: builds)")
-    parser.add_argument("-p", "--project", default=None, help="Project name; defaults to ONNX filename stem")
+    parser.add_argument("-o", "--out-root", default="builds", help="Output root directory")
+    parser.add_argument("-p", "--project", default=None, help="Project name; defaults to ONNX stem")
     args = parser.parse_args()
 
     try:
         graph_path, weights_map = emit_ir_json(args.onnx_path, out_root=args.out_root, project=args.project)
     except FileNotFoundError as e:
-        print(f"error: {e}", file=sys.stderr)
-        sys.exit(2)
+        print(f"error: {e}", file=sys.stderr); sys.exit(2)
     except Exception as e:
-        print(f"error: {type(e).__name__}: {e}", file=sys.stderr)
-        sys.exit(1)
+        print(f"error: {type(e).__name__}: {e}", file=sys.stderr); sys.exit(1)
 
     print("IR graph:", graph_path)
     if weights_map:

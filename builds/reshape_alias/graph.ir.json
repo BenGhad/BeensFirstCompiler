@@ -1,0 +1,191 @@
+{
+  "meta": {
+    "ir_version": 2,
+    "producer": "aicc-0.1",
+    "opset": 13,
+    "opset_import": {
+      "": 13
+    },
+    "arena_elems": 2304,
+    "offsets": {
+      "x": 0,
+      "z_mm": 256,
+      "z_reshaped": 256,
+      "z_add": 256,
+      "y": 256
+    }
+  },
+  "values": {
+    "x": {
+      "type": {
+        "dtype": "f32",
+        "shape": [
+          1,
+          256
+        ]
+      }
+    },
+    "y": {
+      "type": {
+        "dtype": "f32",
+        "shape": [
+          64,
+          32
+        ]
+      }
+    },
+    "W": {
+      "type": {
+        "dtype": "f32",
+        "shape": [
+          256,
+          2048
+        ]
+      }
+    },
+    "b": {
+      "type": {
+        "dtype": "f32",
+        "shape": [
+          32
+        ]
+      }
+    },
+    "shape": {
+      "type": {
+        "dtype": "i64",
+        "shape": [
+          2
+        ]
+      }
+    },
+    "z_mm": {
+      "type": {
+        "dtype": "f32",
+        "shape": [
+          1,
+          2048
+        ]
+      }
+    },
+    "z_reshaped": {
+      "type": {
+        "dtype": "f32",
+        "shape": [
+          64,
+          32
+        ]
+      }
+    },
+    "z_add": {
+      "type": {
+        "dtype": "f32",
+        "shape": [
+          64,
+          32
+        ]
+      }
+    }
+  },
+  "consts": {
+    "W": {
+      "type": {
+        "dtype": "f32",
+        "shape": [
+          256,
+          2048
+        ]
+      },
+      "storage": {
+        "file": "weights/W.npy"
+      }
+    },
+    "b": {
+      "type": {
+        "dtype": "f32",
+        "shape": [
+          32
+        ]
+      },
+      "storage": {
+        "file": "weights/b.npy"
+      }
+    },
+    "shape": {
+      "type": {
+        "dtype": "i64",
+        "shape": [
+          2
+        ]
+      },
+      "storage": {
+        "file": "weights/shape.npy"
+      }
+    }
+  },
+  "ops": [
+    {
+      "op_id": "n0",
+      "id": "n0",
+      "op": "matmul",
+      "inputs": [
+        "x",
+        "W"
+      ],
+      "outputs": [
+        "z_mm"
+      ],
+      "attrs": {},
+      "domain": ""
+    },
+    {
+      "op_id": "n1",
+      "id": "n1",
+      "op": "reshape",
+      "inputs": [
+        "z_mm",
+        "shape"
+      ],
+      "outputs": [
+        "z_reshaped"
+      ],
+      "attrs": {},
+      "domain": ""
+    },
+    {
+      "op_id": "n2",
+      "id": "n2",
+      "op": "add",
+      "inputs": [
+        "z_reshaped",
+        "b"
+      ],
+      "outputs": [
+        "z_add"
+      ],
+      "attrs": {},
+      "domain": ""
+    },
+    {
+      "op_id": "n3",
+      "id": "n3",
+      "op": "relu",
+      "inputs": [
+        "z_add"
+      ],
+      "outputs": [
+        "y"
+      ],
+      "attrs": {},
+      "domain": ""
+    }
+  ],
+  "entry": {
+    "inputs": [
+      "x"
+    ],
+    "outputs": [
+      "y"
+    ]
+  }
+}

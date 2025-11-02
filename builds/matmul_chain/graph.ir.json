@@ -1,0 +1,442 @@
+{
+  "meta": {
+    "ir_version": 2,
+    "producer": "aicc-0.1",
+    "opset": 13,
+    "opset_import": {
+      "": 13
+    },
+    "arena_elems": 400,
+    "offsets": {
+      "x": 0,
+      "z1": 16,
+      "z2": 144,
+      "z3": 144,
+      "z4": 144,
+      "z5": 144,
+      "z6": 16,
+      "z7": 16,
+      "z8": 16,
+      "y": 0
+    }
+  },
+  "values": {
+    "x": {
+      "type": {
+        "dtype": "f32",
+        "shape": [
+          1,
+          16
+        ]
+      }
+    },
+    "y": {
+      "type": {
+        "dtype": "f32",
+        "shape": [
+          1,
+          8
+        ]
+      }
+    },
+    "W1": {
+      "type": {
+        "dtype": "f32",
+        "shape": [
+          16,
+          128
+        ]
+      }
+    },
+    "W2": {
+      "type": {
+        "dtype": "f32",
+        "shape": [
+          128,
+          256
+        ]
+      }
+    },
+    "W3": {
+      "type": {
+        "dtype": "f32",
+        "shape": [
+          256,
+          256
+        ]
+      }
+    },
+    "W4": {
+      "type": {
+        "dtype": "f32",
+        "shape": [
+          256,
+          256
+        ]
+      }
+    },
+    "W5": {
+      "type": {
+        "dtype": "f32",
+        "shape": [
+          256,
+          192
+        ]
+      }
+    },
+    "W6": {
+      "type": {
+        "dtype": "f32",
+        "shape": [
+          192,
+          128
+        ]
+      }
+    },
+    "W7": {
+      "type": {
+        "dtype": "f32",
+        "shape": [
+          128,
+          64
+        ]
+      }
+    },
+    "W8": {
+      "type": {
+        "dtype": "f32",
+        "shape": [
+          64,
+          32
+        ]
+      }
+    },
+    "W9": {
+      "type": {
+        "dtype": "f32",
+        "shape": [
+          32,
+          8
+        ]
+      }
+    },
+    "z1": {
+      "type": {
+        "dtype": "f32",
+        "shape": [
+          1,
+          128
+        ]
+      }
+    },
+    "z2": {
+      "type": {
+        "dtype": "f32",
+        "shape": [
+          1,
+          256
+        ]
+      }
+    },
+    "z3": {
+      "type": {
+        "dtype": "f32",
+        "shape": [
+          1,
+          256
+        ]
+      }
+    },
+    "z4": {
+      "type": {
+        "dtype": "f32",
+        "shape": [
+          1,
+          256
+        ]
+      }
+    },
+    "z5": {
+      "type": {
+        "dtype": "f32",
+        "shape": [
+          1,
+          192
+        ]
+      }
+    },
+    "z6": {
+      "type": {
+        "dtype": "f32",
+        "shape": [
+          1,
+          128
+        ]
+      }
+    },
+    "z7": {
+      "type": {
+        "dtype": "f32",
+        "shape": [
+          1,
+          64
+        ]
+      }
+    },
+    "z8": {
+      "type": {
+        "dtype": "f32",
+        "shape": [
+          1,
+          32
+        ]
+      }
+    }
+  },
+  "consts": {
+    "W1": {
+      "type": {
+        "dtype": "f32",
+        "shape": [
+          16,
+          128
+        ]
+      },
+      "storage": {
+        "file": "weights/W1.npy"
+      }
+    },
+    "W2": {
+      "type": {
+        "dtype": "f32",
+        "shape": [
+          128,
+          256
+        ]
+      },
+      "storage": {
+        "file": "weights/W2.npy"
+      }
+    },
+    "W3": {
+      "type": {
+        "dtype": "f32",
+        "shape": [
+          256,
+          256
+        ]
+      },
+      "storage": {
+        "file": "weights/W3.npy"
+      }
+    },
+    "W4": {
+      "type": {
+        "dtype": "f32",
+        "shape": [
+          256,
+          256
+        ]
+      },
+      "storage": {
+        "file": "weights/W4.npy"
+      }
+    },
+    "W5": {
+      "type": {
+        "dtype": "f32",
+        "shape": [
+          256,
+          192
+        ]
+      },
+      "storage": {
+        "file": "weights/W5.npy"
+      }
+    },
+    "W6": {
+      "type": {
+        "dtype": "f32",
+        "shape": [
+          192,
+          128
+        ]
+      },
+      "storage": {
+        "file": "weights/W6.npy"
+      }
+    },
+    "W7": {
+      "type": {
+        "dtype": "f32",
+        "shape": [
+          128,
+          64
+        ]
+      },
+      "storage": {
+        "file": "weights/W7.npy"
+      }
+    },
+    "W8": {
+      "type": {
+        "dtype": "f32",
+        "shape": [
+          64,
+          32
+        ]
+      },
+      "storage": {
+        "file": "weights/W8.npy"
+      }
+    },
+    "W9": {
+      "type": {
+        "dtype": "f32",
+        "shape": [
+          32,
+          8
+        ]
+      },
+      "storage": {
+        "file": "weights/W9.npy"
+      }
+    }
+  },
+  "ops": [
+    {
+      "op_id": "n0",
+      "id": "n0",
+      "op": "matmul",
+      "inputs": [
+        "x",
+        "W1"
+      ],
+      "outputs": [
+        "z1"
+      ],
+      "attrs": {},
+      "domain": ""
+    },
+    {
+      "op_id": "n1",
+      "id": "n1",
+      "op": "matmul",
+      "inputs": [
+        "z1",
+        "W2"
+      ],
+      "outputs": [
+        "z2"
+      ],
+      "attrs": {},
+      "domain": ""
+    },
+    {
+      "op_id": "n2",
+      "id": "n2",
+      "op": "matmul",
+      "inputs": [
+        "z2",
+        "W3"
+      ],
+      "outputs": [
+        "z3"
+      ],
+      "attrs": {},
+      "domain": ""
+    },
+    {
+      "op_id": "n3",
+      "id": "n3",
+      "op": "matmul",
+      "inputs": [
+        "z3",
+        "W4"
+      ],
+      "outputs": [
+        "z4"
+      ],
+      "attrs": {},
+      "domain": ""
+    },
+    {
+      "op_id": "n4",
+      "id": "n4",
+      "op": "matmul",
+      "inputs": [
+        "z4",
+        "W5"
+      ],
+      "outputs": [
+        "z5"
+      ],
+      "attrs": {},
+      "domain": ""
+    },
+    {
+      "op_id": "n5",
+      "id": "n5",
+      "op": "matmul",
+      "inputs": [
+        "z5",
+        "W6"
+      ],
+      "outputs": [
+        "z6"
+      ],
+      "attrs": {},
+      "domain": ""
+    },
+    {
+      "op_id": "n6",
+      "id": "n6",
+      "op": "matmul",
+      "inputs": [
+        "z6",
+        "W7"
+      ],
+      "outputs": [
+        "z7"
+      ],
+      "attrs": {},
+      "domain": ""
+    },
+    {
+      "op_id": "n7",
+      "id": "n7",
+      "op": "matmul",
+      "inputs": [
+        "z7",
+        "W8"
+      ],
+      "outputs": [
+        "z8"
+      ],
+      "attrs": {},
+      "domain": ""
+    },
+    {
+      "op_id": "n8",
+      "id": "n8",
+      "op": "matmul",
+      "inputs": [
+        "z8",
+        "W9"
+      ],
+      "outputs": [
+        "y"
+      ],
+      "attrs": {},
+      "domain": ""
+    }
+  ],
+  "entry": {
+    "inputs": [
+      "x"
+    ],
+    "outputs": [
+      "y"
+    ]
+  }
+}
