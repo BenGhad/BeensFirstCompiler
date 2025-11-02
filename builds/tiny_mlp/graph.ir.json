@@ -2,7 +2,17 @@
   "meta": {
     "ir_version": 2,
     "producer": "aicc-0.1",
-    "opset": 1
+    "opset": 13,
+    "opset_import": {
+      "": 13
+    },
+    "arena_elems": 4,
+    "offsets": {
+      "x": 0,
+      "z1": 0,
+      "z2": 0,
+      "y": 0
+    }
   },
   "values": {
     "x": {
@@ -87,6 +97,7 @@
   "ops": [
     {
       "op_id": "n0",
+      "id": "n0",
       "op": "matmul",
       "inputs": [
         "x",
@@ -95,10 +106,12 @@
       "outputs": [
         "z1"
       ],
-      "attrs": {}
+      "attrs": {},
+      "domain": ""
     },
     {
       "op_id": "n1",
+      "id": "n1",
       "op": "add",
       "inputs": [
         "z1",
@@ -107,10 +120,12 @@
       "outputs": [
         "z2"
       ],
-      "attrs": {}
+      "attrs": {},
+      "domain": ""
     },
     {
       "op_id": "n2",
+      "id": "n2",
       "op": "relu",
       "inputs": [
         "z2"
@@ -118,7 +133,8 @@
       "outputs": [
         "y"
       ],
-      "attrs": {}
+      "attrs": {},
+      "domain": ""
     }
   ],
   "entry": {

@@ -10,8 +10,13 @@ def dtype_check(ir):
             if not (_dtype(ir, ins[0]) == _dtype(ir, ins[1]) == "f32"): raise RuntimeError("matmul requires f32")
             ir["values"][out]["type"]["dtype"] = "f32"
         elif k == "add":
-            if _dtype(ir, ins[0]) != _dtype(ir, ins[1]): raise RuntimeError("add dtype mismatch")
-            ir["values"][out]["type"]["dtype"] = _dtype(ir, ins[0])
+            if len(op["inputs"]) == 2 and _dtype(ir, ins[0]) == _dtype(ir, ins[1]):
+                ir["values"][out]["type"]["dtype"] = _dtype(ir, ins[0])
+            elif len(op["inputs"]) == 2 and _dtype(ir, ins[1]) == _dtype(ir, ins[0]):
+                ir["values"][out]["type"]["dtype"] = _dtype(ir, ins[0])
+            else:
+                raise RuntimeError("add dtype mismatch")
+
         elif k in ("relu","identity","reshape"):
             ir["values"][out]["type"]["dtype"] = _dtype(ir, ins[0])
         else:
