@@ -10,7 +10,7 @@
 Converts ONNX graphs into optimized C. plans a single tensor arena, and emits C that calls `cblas_sgemm` for large matmuls and a tight kernel for small ones. Writes into outputs in place when safe. A Python tester validates against ONNX Runtime and reports accuracy and speed.
 
 ### Inspiration
-Jake Errington(For making me do this) and Christophe Dubach(For posting the COMP520 outline in advance)
+Jake Errington(For telling me do this) and Christophe Dubach(For posting the COMP520 outline in advance)
 
 
 ### What it be doing
